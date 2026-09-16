@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-systems-from-zero"
+version = "0.1.0"
+description = "GPU systems implementations for language models, including FlashAttention, distributed training, optimizer sharding, and FSDP"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.4",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+benchmark = [
+    "pandas>=2.1",
+    "matplotlib>=3.8",
+]
+gpu = [
+    "triton>=3.0; platform_system == 'Linux'",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

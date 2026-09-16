@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+.env
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/
+
+# Datasets and model artifacts
+data/
+*.bin
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+
+# Raw profiler output
+*.nsys-rep
+*.sqlite
+*.qdrep
+
+# Temporary output
+*.log
+tmp/
