@@ -183,13 +183,21 @@ class TransformerBlock(nn.Module):
 
 
     def forward(self, x: torch.Tensor, token_positions: torch.Tensor | None = None,mask:torch.Tensor | None=None,use_nvtx:bool=False):
-        y = self.ln1(x)
+        if use_nvtx:
+            with nvtx.range("RMSNorm"):
+                y = self.ln1(x)
+        else:
+            y = self.ln1(x)
         if use_nvtx:
             with nvtx.range("Attention"):
                 x = x + self.attn(y,token_positions,mask,use_nvtx)
         else:
             x = x + self.attn(y,token_positions,mask,use_nvtx)
-        y = self.ln2(x)
+        if use_nvtx:
+            with nvtx.range("RMSNorm"):
+                y = self.ln2(x)
+        else:
+            y = self.ln2(x)
         if use_nvtx:
             with nvtx.range("FFN"):
                 x = x + self.ffn(y)
@@ -229,7 +237,7 @@ def scaled_dot_product_attention(Q:torch.Tensor,K:torch.Tensor,V:torch.Tensor,ma
     Tv, Cv = V.shape[-2], V.shape[-1] ### Tv would be same as Tk
 
     if use_nvtx:
-        with nvtx.range("QK_transpose"):
+        with nvtx.range("QK matmul"):
             attention_matrix = Q@K.transpose(-1,-2)/math.sqrt(Cq)
     else:
         attention_matrix = Q@K.transpose(-1,-2)/math.sqrt(Cq)
@@ -244,7 +252,15 @@ def scaled_dot_product_attention(Q:torch.Tensor,K:torch.Tensor,V:torch.Tensor,ma
     else:
         attention_scores = softmax(masked_attention,dim=-1)
 
-    return attention_scores@V
+    if use_nvtx:
+        with nvtx.range("PV matmul"):
+            output = attention_scores @ V
+    else:
+        output = attention_scores @ V
+
+
+
+    return output
 
 
 
