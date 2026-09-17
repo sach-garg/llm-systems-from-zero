@@ -75,6 +75,8 @@ def main():
     if config.mode not in ["F", "FB", "FBO"]:
         raise ValueError("mode must be one of 'F', 'FB', or 'FBO'")
 
+    grad_context = torch.no_grad if config.mode == "F" else nullcontext
+
     device = config.device if config.device is not None else ("cuda" if torch.cuda.is_available() else "cpu")
 
     data = torch.randint(high=config.vocab_size, size=(config.batch_size, config.context_length+1), 
@@ -95,17 +97,18 @@ def main():
 
   
     for _ in range(config.warmup):
-        with autocast():
-            logits = model(x)
-        if config.mode == "F":
-            continue
-        with autocast():
-            loss = cross_entropy(logits.reshape(-1, logits.size(-1)),y.reshape(-1)) ### -> [B*T,V], [B*T]
-        optimizer.zero_grad() ## Optimizer and backward use same dtypes as produced in forward pass, so no autocasting
-        loss.backward() ## Also optimizer and backward produce and use gradients, so no autocasting on them
-        if config.mode == "FB":
-            continue
-        optimizer.step()
+        with grad_context():
+            with autocast():
+                logits = model(x)
+            if config.mode == "F":
+                continue
+            with autocast():
+                loss = cross_entropy(logits.reshape(-1, logits.size(-1)),y.reshape(-1)) ### -> [B*T,V], [B*T]
+            optimizer.zero_grad() ## Optimizer and backward use same dtypes as produced in forward pass, so no autocasting
+            loss.backward() ## Also optimizer and backward produce and use gradients, so no autocasting on them
+            if config.mode == "FB":
+                continue
+            optimizer.step()
 
     times =[]
     if "cuda" in device:
@@ -115,34 +118,35 @@ def main():
     for _ in range(config.measure_iters):
         if "cuda" in device:
             torch.cuda.synchronize()
-        start = default_timer()
+        with grad_context():
+            start = default_timer()
 
-        with autocast():
-            logits = model(x)
+            with autocast():
+                logits = model(x)
 
-        if config.mode=="F":
-            if "cuda" in device:
-                torch.cuda.synchronize()
-            end = default_timer()
-            times.append(end-start)
-            continue
-        with autocast():
-            loss = cross_entropy(logits.reshape(-1, logits.size(-1)),y.reshape(-1)) ### -> [B*T,V], [B*T]
-        optimizer.zero_grad()
-        loss.backward()
-        if config.mode == "FB":
-            if "cuda" in device:
-                torch.cuda.synchronize()
-            end = default_timer()
-            times.append(end-start)
-            continue
-        optimizer.step()
-    
-        if config.mode == "FBO":
-            if "cuda" in device:
-                torch.cuda.synchronize()
-            end = default_timer()
-            times.append(end-start)
+            if config.mode=="F":
+                if "cuda" in device:
+                    torch.cuda.synchronize()
+                end = default_timer()
+                times.append(end-start)
+                continue
+            with autocast():
+                loss = cross_entropy(logits.reshape(-1, logits.size(-1)),y.reshape(-1)) ### -> [B*T,V], [B*T]
+            optimizer.zero_grad()
+            loss.backward()
+            if config.mode == "FB":
+                if "cuda" in device:
+                    torch.cuda.synchronize()
+                end = default_timer()
+                times.append(end-start)
+                continue
+            optimizer.step()
+        
+            if config.mode == "FBO":
+                if "cuda" in device:
+                    torch.cuda.synchronize()
+                end = default_timer()
+                times.append(end-start)
 
     df = append_benchmark_result(config, device, times)
     print(df.tail())
