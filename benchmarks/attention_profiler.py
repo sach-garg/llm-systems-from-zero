@@ -77,7 +77,7 @@ def main():
                         torch.cuda.synchronize()
                         end=default_timer()
                         backward_times.append(end-start)
-                    stats[(d_model, T,operator_fuse,args.flash_attention)] = {
+                    stats[(d_model, T,operator_fuse)] = {
                                             "forward_mean": sum(forward_times) / len(forward_times),
                                             "forward_std": pd.Series(forward_times).std(),
                                             "backward_mean": sum(backward_times) / len(backward_times),
