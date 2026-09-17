@@ -359,7 +359,8 @@ def FAT2_triton_bwd_dQ(Q_ptr,Q_batch_stride,Q_token_stride,Q_dim_stride,
 
 class FlashAttention2Triton(torch.autograd.Function):
   @staticmethod
-  def forward(ctx,Q:torch.Tensor,K:torch.Tensor,V:torch.Tensor,is_causal:bool=False):
+  def forward(ctx,Q:torch.Tensor,K:torch.Tensor,V:torch.Tensor,
+              Q_TILE_SIZE: int=16, K_TILE_SIZE: int =16, is_causal:bool=False):
     #### Expects Q.shape as [B,h,TQ,dh] and K,V.shape as [B,h,TK,dh]
 
     assert Q.is_cuda and Q.device == K.device == V.device and Q.ndim==4 and Q.ndim == K.ndim == V.ndim
@@ -381,8 +382,7 @@ class FlashAttention2Triton(torch.autograd.Function):
     O = torch.empty_like(Q_flat, dtype = Q.dtype)
     L = torch.zeros((Q_flat.shape[0],TQ), dtype=torch.float32 ,device = Q.device)
 
-    Q_TILE_SIZE = 16
-    K_TILE_SIZE = 16
+
     scale = 1/math.sqrt(dh)
     FAT2_triton_fwd[(triton.cdiv(TQ,Q_TILE_SIZE),Q_flat.shape[0])](Q_flat,Q_flat.stride(0),Q_flat.stride(1),Q_flat.stride(2),
                                                                     K_flat,K_flat.stride(0),K_flat.stride(1),K_flat.stride(2),
@@ -398,6 +398,8 @@ class FlashAttention2Triton(torch.autograd.Function):
     O = O.reshape((B,h,TQ,dh))
     L = L.reshape((B,h,TQ))
     ctx.save_for_backward(L,Q,K,V,O)
+    ctx.Q_TILE_SIZE = Q_TILE_SIZE
+    ctx.K_TILE_SIZE = K_TILE_SIZE
     ctx.is_causal= is_causal
     return O
 
@@ -419,8 +421,8 @@ class FlashAttention2Triton(torch.autograd.Function):
 
       Delta = torch.empty((Q_flat.shape[0], TQ),dtype=torch.float32,device=Q.device)
 
-      Q_TILE_SIZE = 16
-      K_TILE_SIZE = 16
+      Q_TILE_SIZE = ctx.Q_TILE_SIZE
+      K_TILE_SIZE = ctx.K_TILE_SIZE
       scale = 1.0 / math.sqrt(D)
       q_grid = (triton.cdiv(TQ, Q_TILE_SIZE),Q_flat.shape[0])
 
@@ -458,11 +460,12 @@ class FlashAttention2Triton(torch.autograd.Function):
       dK = dK_flat.reshape_as(K)
       dV = dV_flat.reshape_as(V)
 
-      return dQ, dK, dV, None
+      return dQ, dK, dV, None, None, None ### PyTorch expects backward() to return one gradient entry for every argument passed to .apply().
 
 
-def flash_attention(Q: torch.Tensor,K: torch.Tensor,V: torch.Tensor,is_causal: bool = False) -> torch.Tensor:
-    return FlashAttention2Triton.apply(Q,K,V,is_causal)
+def flash_attention(Q: torch.Tensor,K: torch.Tensor,V: torch.Tensor,
+                    Q_TILE: int =16, K_TILE: int=16, is_causal: bool = True) -> torch.Tensor:
+    return FlashAttention2Triton.apply(Q,K,V,Q_TILE,K_TILE,is_causal) ###.apply only takes positional argument so writing Q_TILE= Q_TILE would be wrong
 
 
 
