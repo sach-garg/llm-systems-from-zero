@@ -29,6 +29,8 @@ def parse_args():
     parser.add_argument("--precision",type=str,choices = ["torch.float32","torch.float16","torch.bfloat16"])
     parser.add_argument("--out_dir", type=str)
     parser.add_argument("--FSDP_mem_efficient", action="store_true")
+    parser.add_argument("--min_cleanup_distance", type=int, default=1)
+    parser.add_argument("--max_cleanup_distance", type=int, default=1)
     return parser.parse_args()
 
 
@@ -63,7 +65,7 @@ def FSDP_training(rank,world_size,config,result_queue):
     dtypes = {"torch.float32": None, "torch.float16":torch.float16, "torch.bfloat16":torch.bfloat16}
 
     if config.FSDP_mem_efficient:
-        model = FSDP_mem_efficient(base_model,dtypes[config.precision])
+        model = FSDP_mem_efficient(base_model,dtypes[config.precision],cleanup_distance = config.cleanup_distance)
     else:
         model = FSDP(base_model,dtypes[config.precision])
 
@@ -172,8 +174,7 @@ def FSDP_training(rank,world_size,config,result_queue):
 
 
 
-def main():
-    config = BuildConfig()
+def run_configuration(config):
     out_dir = Path(config.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     world_size=2
@@ -183,17 +184,33 @@ def main():
     results = result_queue.get()
     final_iteration_times = results["iteration_times"]
     final_memory_stats = results["memory_stats"]
-    rows = [{"rank": r, "iteration": i, "iteration_time": final_iteration_times[r][i]} for r in range(world_size) for i in range(config.measure_iters)]
+    rows = [{"rank": r, "cleanup_distance": config.cleanup_distance, "iteration": i, "iteration_time": final_iteration_times[r][i]} for r in range(world_size) for i in range(config.measure_iters)]
 
-    mem_rows = [{"rank":r, "mem_after_init": final_memory_stats[r][0], "pmem_after_init": final_memory_stats[r][1],
+    mem_rows = [{"rank":r, "cleanup_distance": config.cleanup_distance, "mem_after_init": final_memory_stats[r][0], "pmem_after_init": final_memory_stats[r][1],
                     "mem_after_data": final_memory_stats[r][2], "pmem_after_data": final_memory_stats[r][3],
                     "mem_after_fwd": final_memory_stats[r][4], "pmem_after_fwd": final_memory_stats[r][5],
                     "mem_after_bkwd": final_memory_stats[r][6], "pmem_after_bkwd": final_memory_stats[r][7],
                     "mem_after_step": final_memory_stats[r][8], "pmem_after_step": final_memory_stats[r][9]} for r in range(world_size)]
     df = pd.DataFrame(rows)
     df_mem =  pd.DataFrame(mem_rows)
-    df.to_csv(out_dir / f"Timing_FSDP_mem_efficient_{config.FSDP_mem_efficient}.csv", index=False)
-    df_mem.to_csv(out_dir / f"Memory_FSDP_mem_efficient_{config.FSDP_mem_efficient}.csv", index=False)
+    df.to_csv(out_dir / f"Timing_FSDP_mem_efficient_{config.FSDP_mem_efficient}_cleanup_{config.cleanup_distance}.csv", index=False)
+    df_mem.to_csv(out_dir / f"Memory_FSDP_mem_efficient_{config.FSDP_mem_efficient}_cleanup_{config.cleanup_distance}.csv", index=False)
+    return
+
+def main():
+    config = BuildConfig()
+    if not config.FSDP_mem_efficient:
+        config.cleanup_distance = None
+        run_configuration(config)
+        return
+    minimum = config.min_cleanup_distance
+    maximum = config.max_cleanup_distance
+    for distance in range(minimum, maximum + 1):
+        config.cleanup_distance = distance
+        print(f"Running cleanup_distance={distance}", flush=True)
+        run_configuration(config)
+
+
     return
 
 if __name__ == "__main__":

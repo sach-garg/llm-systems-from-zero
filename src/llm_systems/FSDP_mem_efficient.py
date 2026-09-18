@@ -45,12 +45,16 @@ def custom_FSDP_Linear(layer, x):
 
 
 class FSDP_mem_efficient(torch.nn.Module):
-    def __init__(self,module : torch.nn.Module, compute_dtype : torch.dtype | None=None):
+    def __init__(self,module : torch.nn.Module, compute_dtype : torch.dtype | None=None, cleanup_distance: int =1):
         super().__init__()
         self.module = module
         self.rank = dist.get_rank()
         self.world_size = dist.get_world_size()
         self.compute_dtype = compute_dtype
+        self.prefetch_distance = 2
+        self.cleanup_distance = cleanup_distance
+                  
+        
 
         #### Broadcast weights at initialization
         with torch.no_grad():
@@ -69,9 +73,7 @@ class FSDP_mem_efficient(torch.nn.Module):
                 self.sharded_layers.append(child)
 
         self.sharded_layer_indices= {layer:id for id,layer in enumerate(self.sharded_layers)}
-        self.prefetch_distance = 2
-          
-
+      
       
         
         ### Creating a metadata dictionary which stores the original shape of the sharded weight tensors
@@ -237,9 +239,12 @@ class FSDP_mem_efficient(torch.nn.Module):
         return
 
     def release_completed_gradient_buffers(self, current_layer):
+        if self.cleanup_distance ==0:
+            return
         current_id = self.sharded_layer_indices[current_layer]
 
-        for layer in self.sharded_layers[current_id + 1:]:
+        for layer_id in range(current_id + self.cleanup_distance, len(self.sharded_layers), self.cleanup_distance):
+            layer = self.sharded_layers[layer_id]
             metadata = self.sharded_metadata[layer]
             handle = metadata["grad_handle"]
 
